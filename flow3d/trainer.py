@@ -11,7 +11,7 @@ from nerfview import CameraState
 from pytorch_msssim import SSIM
 from torch.utils.tensorboard import SummaryWriter  # type: ignore
 
-from flow3d.configs import LossesConfig, OptimizerConfig, SceneLRConfig
+from flow3d.configs import LossesConfig, OptimizerConfig, PriorConfig, SceneLRConfig
 from flow3d.loss_utils import (
     compute_gradient_loss,
     compute_se3_smoothness_loss,
@@ -19,6 +19,7 @@ from flow3d.loss_utils import (
     masked_l1_loss,
 )
 from flow3d.metrics import PCK, mLPIPS, mPSNR, mSSIM
+from flow3d.relational_prior import RelationalPrior
 from flow3d.scene_model import SceneModel
 from flow3d.vis.utils import get_server
 from flow3d.vis.viewer import DynamicViewer
@@ -40,6 +41,7 @@ class Trainer:
         validate_every: int = 500,
         validate_video_every: int = 1000,
         validate_viewer_assets_every: int = 100,
+        prior_cfg: PriorConfig | None = None,
     ):
         self.device = device
         self.log_every = log_every
@@ -59,6 +61,15 @@ class Trainer:
             self.optim_cfg.reset_opacity_every_n_controls * self.optim_cfg.control_every
         )
         self.optimizers, self.scheduler = self.configure_optimizers()
+
+        # Relational motion priors (no parameters; None when all weights are 0).
+        self.prior = None
+        if prior_cfg is not None:
+            prior = RelationalPrior(prior_cfg, model.num_frames)
+            if prior.enabled:
+                prior.stop_control_steps = optim_cfg.stop_control_steps
+                self.prior = prior
+                guru.info(f"Relational prior enabled: {prior_cfg}")
 
         # running stats for adaptive density control
         self.running_stats = {
@@ -117,7 +128,7 @@ class Trainer:
     ) -> tuple["Trainer", int]:
         guru.info(f"Loading checkpoint from {path}")
         # ckpt = torch.load(path)
-        ckpt = torch.load(path, weights_only=False)
+        ckpt = torch.load(path, map_location=device, weights_only=False)
         state_dict = ckpt["model"]
         model = SceneModel.init_from_state_dict(state_dict)
         model = model.to(device)
@@ -172,10 +183,9 @@ class Trainer:
 
         loss, stats, num_rays_per_step, num_rays_per_sec = self.compute_losses(batch)
         if loss.isnan():
-            guru.info(f"Loss is NaN at step {self.global_step}!!")
-            import ipdb
-
-            ipdb.set_trace()
+            # Raise instead of ipdb.set_trace(): a debugger prompt hangs
+            # background runs forever.
+            raise RuntimeError(f"Loss is NaN at step {self.global_step}: {stats}")
         loss.backward()
 
         for opt in self.optimizers.values():
@@ -476,8 +486,7 @@ class Trainer:
             )
         
         if self.model.fg.params["means"].isnan().sum() > 0:
-            import ipdb
-            ipdb.set_trace()
+            raise RuntimeError(f"NaN in fg means at step {self.global_step}")
         # # sparsity loss
         # loss += 0.01 * self.opacity_activation(self.opacities).abs().mean()
 
@@ -486,6 +495,22 @@ class Trainer:
 
 
         loss += self.losses_cfg.w_z_accel * z_accel_loss
+
+        # Relational motion priors (TV on weights, joints between bones).
+        prior_stats = {}
+        if self.prior is not None:
+            prior_loss, prior_stats = self.prior.loss(
+                self.model, self.epoch, self.global_step
+            )
+            if torch.isfinite(prior_loss):
+                loss += prior_loss
+                prior_stats["train/prior_skipped"] = 0.0
+            else:
+                guru.warning(
+                    f"Non-finite relational prior at step {self.global_step}; "
+                    f"skipped. {prior_stats}"
+                )
+                prior_stats["train/prior_skipped"] = 1.0
 
         # Prepare stats for logging.
         stats = {
@@ -501,6 +526,7 @@ class Trainer:
             "train/num_gaussians": self.model.num_gaussians,
             "train/num_fg_gaussians": self.model.num_fg_gaussians,
             "train/num_bg_gaussians": self.model.num_bg_gaussians,
+            **prior_stats,
         }
 
         # Compute metrics.
@@ -682,6 +708,8 @@ class Trainer:
                 dim=0,
             )
             self.running_stats[k] = new_v
+        if self.prior is not None:
+            self.prior.mark_dirty()  # fg Gaussians were reordered / resized
         guru.info(
             f"Split {should_split.sum().item()} gaussians, "
             f"Duplicated {should_dup.sum().item()} gaussians, "
@@ -729,6 +757,8 @@ class Trainer:
         # update running stats
         for k, v in self.running_stats.items():
             self.running_stats[k] = v[~should_cull]
+        if self.prior is not None and should_fg_cull.any():
+            self.prior.mark_dirty()  # fg Gaussians were removed
 
         guru.info(
             f"Culled {should_cull.sum().item()} gaussians, "
