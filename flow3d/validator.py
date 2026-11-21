@@ -418,6 +418,14 @@ class Validator:
             make_video_divisble(np.stack(track_2d_video, 0)),
             fps=fps,
         )
+        # Free the earlier videos' frame buffers before the last render; on long
+        # sequences (e.g. iPhone, 277 frames) keeping them all alive runs the
+        # machine out of RAM.
+        del track_2d_video, tracks_2d, target_imgs
+        del video, ref_pred_depths, depth_video, surf_normals, normal_video, masks, normals
+        import gc
+
+        gc.collect()
         # Render motion coefficient video.
         with torch.random.fork_rng():
             torch.random.manual_seed(0)
@@ -453,10 +461,11 @@ class Validator:
             )
             # Putting results onto CPU since it will consume unnecessarily
             # large GPU memory for long sequence OW.
-            video.append(torch.cat([img, rendered["img"][0]], dim=1).cpu())
+            frame = torch.cat([img, rendered["img"][0]], dim=1)
+            video.append((frame.clamp(0, 1) * 255).to(torch.uint8).cpu())  # uint8: 4x less RAM
         video = torch.stack(video, dim=0)
         iio.mimwrite(
             osp.join(video_dir, "motion_coefs.mp4"),
-            make_video_divisble((video.numpy() * 255).astype(np.uint8)),
+            make_video_divisble(video.numpy()),
             fps=fps,
         )

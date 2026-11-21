@@ -8,6 +8,19 @@ from torch import Tensor
 
 from flow3d.params import GaussianParams, MotionBases, CameraScales, CameraPoses
 
+# Channel counts the installed gsplat CUDA kernels are compiled for
+# (GSPLAT_NUM_CHANNELS in gsplat/cuda/csrc/Config.h).
+_GSPLAT_CHANNELS = (1, 2, 3, 4, 5, 6, 8, 9, 16, 17, 21, 23, 24, 32, 33,
+                    64, 65, 128, 129, 256, 257, 512, 513)
+
+
+def _num_pad_channels(n: int) -> int:
+    """Zero channels to append so that n becomes a supported channel count."""
+    for s in _GSPLAT_CHANNELS:
+        if s >= n:
+            return s - n
+    return 0
+
 
 class SceneModel(nn.Module):
     def __init__(
@@ -313,6 +326,15 @@ class SceneModel(nn.Module):
             ) = outputs
         
         else:
+            # gsplat kernels are only compiled for certain channel counts
+            # (e.g. 6 and 8 but not 7). Pad with zero channels up to the next
+            # supported count and strip them after rendering; results are identical.
+            d_colors = colors_override.shape[-1]
+            n_pad = _num_pad_channels(d_colors + (1 if "D" in mode else 0))
+            if n_pad > 0:
+                colors_override = F.pad(colors_override, (0, n_pad))
+                bg_color = F.pad(bg_color, (0, n_pad))
+
             render_colors, alphas, info = rasterization(
                 means=means,
                 quats=quats,
@@ -327,6 +349,12 @@ class SceneModel(nn.Module):
                 packed=False,
                 render_mode=mode,
             )
+            if n_pad > 0:
+                # layout is [colors, pad, (depth)] -> drop the pad channels
+                render_colors = torch.cat(
+                    [render_colors[..., :d_colors], render_colors[..., d_colors + n_pad :]],
+                    dim=-1,
+                )
             render_normals = None
             surf_normals = None
 
