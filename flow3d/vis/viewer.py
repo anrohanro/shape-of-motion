@@ -27,10 +27,10 @@ class DynamicViewer(Viewer):
     ):
         self.num_frames = num_frames
         self.work_dir = Path(work_dir)
-        super().__init__(server, render_fn, mode)
+        super().__init__(server, render_fn, output_dir=self.work_dir, mode=mode)
 
-    def _define_guis(self):
-        super()._define_guis()
+    def _populate_rendering_tab(self):
+        super()._populate_rendering_tab()
         server = self.server
         self._time_folder = server.gui.add_folder("Time")
         with self._time_folder:
@@ -64,6 +64,6 @@ class DynamicViewer(Viewer):
 
         tabs = server.gui.add_tab_group()
         with tabs.add_tab("Render", Icon.CAMERA):
-            self.render_tab_state = populate_render_tab(
+            self.camera_path_render_tab_state = populate_render_tab(
                 server, Path(self.work_dir) / "camera_paths", self._playback_guis[0]
             )

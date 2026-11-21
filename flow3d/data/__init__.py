@@ -3,7 +3,12 @@ from dataclasses import asdict, replace
 from torch.utils.data import Dataset
 
 from .base_dataset import BaseDataset
-from .casual_dataset import CasualDataset, CustomDataConfig, DavisDataConfig
+from .casual_dataset import (
+    CasualDataset,
+    CasualDatasetVideoView,
+    CustomDataConfig,
+    DavisDataConfig,
+)
 from .iphone_dataset import (
     iPhoneDataConfig,
     iPhoneDataset,
@@ -35,6 +40,7 @@ def get_train_val_datasets(
         data_cfg, CustomDataConfig
     ):
         train_dataset = CasualDataset(**asdict(data_cfg))
+        train_video_view = CasualDatasetVideoView(train_dataset)
     elif isinstance(data_cfg, NvidiaDataConfig):
         train_dataset = NvidiaDataset(**asdict(data_cfg))
         train_video_view = NvidiaDatasetVideoView(train_dataset)

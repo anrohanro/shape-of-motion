@@ -10,6 +10,7 @@ import imageio
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torch.utils.data import Dataset
 import tyro
 from loguru import logger as guru
 from roma import roma
@@ -489,6 +490,33 @@ class CasualDataset(BaseDataset):
             padding_mode="border",
         )[:, 0, :, 0]
         return data
+
+
+class CasualDatasetVideoView(Dataset):
+    """Dataset view of the training video, used to render train-view videos
+    (same role as iPhoneDatasetVideoView / NvidiaDatasetVideoView)."""
+
+    def __init__(self, dataset: CasualDataset, fps: float = 30.0):
+        super().__init__()
+        self.dataset = dataset
+        self.fps = fps
+        # Validator.save_train_videos reads fps from the underlying dataset
+        if not hasattr(dataset, "fps"):
+            dataset.fps = fps
+
+    def __len__(self):
+        return self.dataset.num_frames
+
+    def __getitem__(self, index):
+        return {
+            "frame_names": self.dataset.frame_names[index],
+            "ts": index,
+            "w2cs": self.dataset.w2cs[index],
+            "Ks": self.dataset.Ks[index],
+            "imgs": self.dataset.get_image(index),
+            "depths": self.dataset.get_depth(index),
+            "masks": self.dataset.get_mask(index),
+        }
 
 
 def load_cameras(

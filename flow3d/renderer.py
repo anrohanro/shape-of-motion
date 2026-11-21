@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from loguru import logger as guru
-from nerfview import CameraState
+from nerfview import CameraState, RenderTabState
 
 from flow3d.scene_model import SceneModel
 from flow3d.vis.utils import draw_tracks_2d_th, get_server
@@ -45,7 +45,7 @@ class Renderer:
         path: str, device: torch.device, use_2dgs, *args, **kwargs
     ) -> "Renderer":
         guru.info(f"Loading checkpoint from {path}")
-        ckpt = torch.load(path)
+        ckpt = torch.load(path, weights_only=False)
         state_dict = ckpt["model"]
         model = SceneModel.init_from_state_dict(state_dict)
         model.use_2dgs = use_2dgs
@@ -57,11 +57,19 @@ class Renderer:
         return renderer
 
     @torch.inference_mode()
-    def render_fn(self, camera_state: CameraState, img_wh: tuple[int, int]):
-        if self.viewer is None:
-            return np.full((img_wh[1], img_wh[0], 3), 255, dtype=np.uint8)
+    def render_fn(
+        self,
+        camera_state: CameraState,
+        img_wh: tuple[int, int] | RenderTabState,
+    ):
+        if isinstance(img_wh, tuple):
+            W, H = img_wh
+        else:
+            W, H = img_wh.viewer_width, img_wh.viewer_height
+        img_wh = (W, H)
 
-        W, H = img_wh
+        if self.viewer is None:
+            return np.full((H, W, 3), 255, dtype=np.uint8)
 
         focal = 0.5 * H / np.tan(0.5 * camera_state.fov).item()
         K = torch.tensor(

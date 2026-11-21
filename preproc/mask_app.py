@@ -298,7 +298,7 @@ def make_demo(
                 frame_index = gr.Slider(
                     label="Frame index",
                     minimum=0,
-                    maximum=len(prompts.img_paths) - 1,
+                    maximum=max(1, len(prompts.img_paths) - 1),
                     value=0,
                     step=1,
                 )
@@ -360,16 +360,14 @@ def make_demo(
             guru.debug(f"Extracting frames to {out_dir}")
             os.makedirs(out_dir, exist_ok=True)
 
-            def make_time(seconds):
-                return datetime.time(
-                    seconds // 3600, (seconds % 3600) // 60, seconds % 60
-                )
-
-            start_time = make_time(start).strftime("%H:%M:%S")
-            end_time = make_time(end).strftime("%H:%M:%S")
+            # ffmpeg accepts (fractional) seconds directly; end <= start means
+            # "until the end of the video" (previously end=0 extracted nothing)
+            time_args = f"-ss {float(start)} "
+            if end is not None and float(end) > float(start):
+                time_args += f"-to {float(end)} "
             cmd = (
-                f"ffmpeg -ss {start_time} -to {end_time} -i {vid_path} "
-                f"-vf 'scale=-1:{height},fps={fps}' {out_dir}/%05d.{ext}"
+                f"ffmpeg -y {time_args}-i {vid_path} "
+                f"-vf 'scale=-1:{int(height)},fps={fps}' {out_dir}/%05d.{ext}"
             )
             print(cmd)
             subprocess.call(cmd, shell=True)
@@ -385,10 +383,15 @@ def make_demo(
         def update_image_dir(root_dir, img_name, seq_name):
             img_dir = f"{root_dir}/{img_name}/{seq_name}"
             num_imgs = prompts.set_img_dir(img_dir)
-            slider = gr.Slider(minimum=0, maximum=num_imgs - 1, value=0, step=1)
-            message = (
-                f"Loaded {num_imgs} images from {img_dir}. Choose a frame to run SAM!"
+            slider = gr.Slider(
+                minimum=0, maximum=max(1, num_imgs - 1), value=0, step=1
             )
+            if num_imgs == 0:
+                message = f"No image frames found in {img_dir}. Extract frames first."
+            else:
+                message = (
+                    f"Loaded {num_imgs} images from {img_dir}. Choose a frame to run SAM!"
+                )
             return slider, message
 
         def get_select_coords(img, evt: gr.SelectData):
@@ -514,4 +517,5 @@ if __name__ == "__main__":
         args.vid_name,
         args.img_name,
     )
-    demo.launch(server_port=args.port)
+    # newer gradio refuses to serve files outside cwd/tmp unless explicitly allowed
+    demo.launch(server_port=args.port, allowed_paths=[os.path.abspath(args.root_dir)])

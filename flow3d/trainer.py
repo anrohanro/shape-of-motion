@@ -116,7 +116,8 @@ class Trainer:
         path: str, device: torch.device, use_2dgs, *args, **kwargs
     ) -> tuple["Trainer", int]:
         guru.info(f"Loading checkpoint from {path}")
-        ckpt = torch.load(path)
+        # ckpt = torch.load(path)
+        ckpt = torch.load(path, weights_only=False)
         state_dict = ckpt["model"]
         model = SceneModel.init_from_state_dict(state_dict)
         model = model.to(device)
@@ -572,22 +573,41 @@ class Trainer:
         for _current_xys, _current_radii, _current_img_wh in zip(
             self._batched_xys, self._batched_radii, self._batched_img_wh
         ):
-            sel = _current_radii > 0
+            # sel = _current_radii > 0
+            # gidcs = torch.where(sel)[1]
+            sel = (_current_radii > 0).any(dim=-1)
             gidcs = torch.where(sel)[1]
             # normalize grads to [-1, 1] screen space
             xys_grad = _current_xys.grad.clone()
+            # print("DEBUG current_xys:", _current_xys.shape)
+            # print("DEBUG current_xys.grad:", _current_xys.grad.shape)
+            # print("DEBUG current_radii:", _current_radii.shape)
+            # print("DEBUG sel:", sel.shape)
+            # print("DEBUG xys_grad[sel]:", xys_grad[sel].shape)
             xys_grad[..., 0] *= _current_img_wh[0] / 2.0 * batch_size
             xys_grad[..., 1] *= _current_img_wh[1] / 2.0 * batch_size
+            # print("DEBUG xys_grad_norm_acc:", self.running_stats["xys_grad_norm_acc"].shape)
+            # print("DEBUG vis_count:", self.running_stats["vis_count"].shape)
+            # print("DEBUG num_gaussians:", self.model.num_gaussians)
+            # print("DEBUG gidcs:", gidcs.shape, gidcs.dtype)
+            # print("DEBUG grad values:", xys_grad[sel].norm(dim=-1).shape)
+            # print("DEBUG target:", self.running_stats["xys_grad_norm_acc"].shape)
+            # print("DEBUG target ndim:", self.running_stats["xys_grad_norm_acc"].ndim)
             self.running_stats["xys_grad_norm_acc"].index_add_(
                 0, gidcs, xys_grad[sel].norm(dim=-1)
             )
             self.running_stats["vis_count"].index_add_(
                 0, gidcs, torch.ones_like(gidcs, dtype=torch.int64)
             )
+            radii = _current_radii.max(dim=-1).values
             max_radii = torch.maximum(
                 self.running_stats["max_radii"].index_select(0, gidcs),
-                _current_radii[sel] / max(_current_img_wh),
+                radii[sel] / max(_current_img_wh),
             )
+            # max_radii = torch.maximum(
+            #     self.running_stats["max_radii"].index_select(0, gidcs),
+            #     _current_radii[sel] / max(_current_img_wh),
+            # )
             self.running_stats["max_radii"].index_put((gidcs,), max_radii)
         return True
 

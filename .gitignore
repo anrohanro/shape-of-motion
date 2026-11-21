@@ -12,3 +12,9 @@ results/
 
 preproc/checkpoints
 preproc/checkpoints/
+
+# local datasets and personal files (not for the repo)
+data/
+mydata/
+commands_*.txt
+gpu_log.csv

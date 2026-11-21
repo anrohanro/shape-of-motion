@@ -162,7 +162,8 @@ def init_motion_params_with_procrustes(
     ids, counts = labels.unique(return_counts=True)
     ids = ids[counts > 100]
     num_bases = len(ids)
-    sampled_centers = sampled_centers[:, ids]
+    sampled_centers = sampled_centers[:, ids.to(sampled_centers.device)]
+    # sampled_centers = sampled_centers[:, ids]
     print(f"{num_bases=} {sampled_centers.shape=}")
 
     # compute basis weights from the distance to the cluster centers
@@ -188,13 +189,20 @@ def init_motion_params_with_procrustes(
     skipped_ts = {}
     for n, cluster_id in enumerate(ids):
         mask_in_cluster = labels == cluster_id
-        cluster = tracks_3d.xyz[mask_in_cluster].transpose(
+        # cluster = tracks_3d.xyz[mask_in_cluster].transpose(
+        cluster = tracks_3d.xyz[mask_in_cluster.to(tracks_3d.xyz.device)].transpose(
             0, 1
         )  # [num_frames, n_pts, 3]
-        visibilities = tracks_3d.visibles[mask_in_cluster].swapaxes(
+        # visibilities = tracks_3d.visibles[mask_in_cluster].swapaxes(
+        visibilities = tracks_3d.visibles[
+            mask_in_cluster.to(tracks_3d.visibles.device)
+        ].swapaxes(
             0, 1
         )  # [num_frames, n_pts]
-        confidences = tracks_3d.confidences[mask_in_cluster].swapaxes(
+        # confidences = tracks_3d.confidences[mask_in_cluster].swapaxes(
+        confidences = tracks_3d.confidences[
+            mask_in_cluster.to(tracks_3d.confidences.device)
+        ].swapaxes(
             0, 1
         )  # [num_frames, n_pts]
         weights = get_weights_for_procrustes(cluster, visibilities)
@@ -581,7 +589,8 @@ def sample_initial_bases_centers(
     num_bases = labels.max().item() + 1
     sampled_centers = torch.stack(
         [
-            means_canonical[torch.tensor(labels == i)].median(dim=0).values
+            # means_canonical[torch.tensor(labels == i)].median(dim=0).values
+            means_canonical[torch.as_tensor(labels == i, device=means_canonical.device, dtype=torch.bool)].median(dim=0).values
             for i in range(num_bases)
         ]
     )[None]
