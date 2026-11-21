@@ -1,7 +1,7 @@
 import os
 import os.path as osp
 import shutil
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Annotated
 
@@ -13,7 +13,7 @@ from loguru import logger as guru
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from flow3d.configs import LossesConfig, OptimizerConfig, SceneLRConfig
+from flow3d.configs import LossesConfig, OptimizerConfig, PriorConfig, SceneLRConfig
 from flow3d.data import (
     BaseDataset,
     DavisDataConfig,
@@ -77,6 +77,10 @@ class TrainConfig:
     validate_every: int = 50
     save_videos_every: int = 50
     use_2dgs: bool = False
+    # Skip all training-video rendering (it can OOM the host); render later
+    # with render_train_videos.py.
+    skip_videos: bool = False
+    prior: PriorConfig = field(default_factory=PriorConfig)
 
 
 def main(cfg: TrainConfig):
@@ -113,6 +117,7 @@ def main(cfg: TrainConfig):
         cfg.optim,
         work_dir=cfg.work_dir,
         port=cfg.port,
+        prior_cfg=cfg.prior,
     )
 
     train_loader = DataLoader(
@@ -164,8 +169,9 @@ def main(cfg: TrainConfig):
             ):
                 val_logs = validator.validate()
                 trainer.log_dict(val_logs)
-            if (epoch > 0 and epoch % cfg.save_videos_every == 0) or (
-                epoch == cfg.num_epochs - 1
+            if not cfg.skip_videos and (
+                (epoch > 0 and epoch % cfg.save_videos_every == 0)
+                or (epoch == cfg.num_epochs - 1)
             ):
                 validator.save_train_videos(epoch)
 

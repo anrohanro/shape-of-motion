@@ -63,6 +63,41 @@ class LossesConfig:
 
 
 @dataclass
+class PriorConfig:
+    """Relational motion priors (flow3d/relational_prior.py).
+
+    All weights default to 0, which leaves Shape of Motion unchanged.
+    Lengths are relative: *_factor x median kNN distance, residuals / fg_scale^2.
+    """
+
+    # Level 1: Charbonnier TV on motion weights over the kNN graph.
+    w_tv: float = 0.0
+    tv_k: int = 8
+    tv_eps: float = 1e-3
+    tv_max_dist_factor: float = 3.0
+    tv_start_epoch: int = 0
+    knn_every_epochs: int = 10
+    # Level 2: joints between adjacent bones.
+    w_joint: float = 0.0
+    w_hinge: float = 0.0
+    joint_start_epoch: int = 150
+    bone_every_epochs: int = 25
+    bone_tau: float = 0.1
+    bone_n_min: int = 200
+    adj_min_edges: int = 20
+    beta_rel: float = 1e-2
+    gm_c: float = 0.05
+    # Joint classification thresholds (doc section 6 table).
+    rot_eps: float = 0.0076  # 2(1 - cos 5deg): eigenvalue of H0/T for ~5deg
+    res_eps: float = 4e-4  # (2% of fg radius)^2
+    hinge_ratio: float = 0.05  # lambda_1 < ratio * lambda_2 => hinge
+    # Bone <-> static background contact.
+    static_contact: bool = True
+    contact_dist_factor: float = 2.0
+    contact_frames: int = 8
+
+
+@dataclass
 class OptimizerConfig:
     max_steps: int = 5000
     ## Adaptive gaussian control
